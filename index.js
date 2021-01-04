@@ -4,6 +4,8 @@ const wifi = require("Wifi");
 // const board = require("ESP8266");
 // const Promise = require("Promise");
 const WebSocket = require("ws");
+// const OneWire = require("OneWire");
+
 
 
 const net_config = {
@@ -16,8 +18,15 @@ const net_config = {
     host: "192.168.0.41",
     port: "8050",
     wsport: "8051"
+  },
+  temp_sensors: {
+    pin: 4,
+    interval: 60
   }
+
 };
+
+
 
 
 
@@ -103,11 +112,14 @@ let API = function(net_config) {
 
 let api = new API(net_config);
 
+
+
 api.on("connect", () => {
   console.log("connect handler");
   api.send("config");
   api.send("limits");
   api.send("sensors");
+
   // api.send("task", "freeze");
 });
 
@@ -131,6 +143,14 @@ api.on("config", (data) => {
 });
 api.on("sensors", (data) => {
   console.log("sensors handler", data);
+
+
+  //let sensors = ow.search().reduce((result, item) => {}, {});
+
+  //Object.keys(data).length
+  //ow.search()
+
+
 });
 api.on("limits", (data) => {
   console.log("limits handler", data);
@@ -139,8 +159,29 @@ api.on("limits", (data) => {
 api.connect();
 
 
+const ow = new OneWire(net_config.temp_sensors.pin);
+let sensors = ow.search().reduce(function (obj, id) {
+  let device = require("DS18B20").connect(ow, id);
+  obj[id] = {
+    id: id,
+    device: device,
+    temp: null
+  };
 
+  // зададим интервал опроса датчиков
+  setInterval(() => {
+    device.getTemp((temp) => {
+      console.log("temp", id, temp);
+      obj[id].temp = temp;
+    });
+  }, net_config.temp_sensors.interval * 1000);
 
+  return obj;
+}, {});
+
+setTimeout(() => {
+  console.log("1wire sensors", sensors);
+}, 500);
 
 
 
