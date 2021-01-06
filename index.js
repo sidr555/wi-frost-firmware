@@ -9,15 +9,10 @@ let conf = {
     tSend: 30
   },
   relays: {
-    compr: {
-      pin: 12
-    },
-    // comprFan: {
-    //   pin: 13
-    // },
-    heater: {
-      pin: 14
-    }
+    compr: 12,
+    // comprFan: 13
+    heater: 14
+
   },
   job: {
     tLoop: 2
@@ -28,92 +23,85 @@ let conf = {
 let log = console.log;
 
 
-function setRelay(name, on) {
-  let r = conf.relays[name];
-  if (r && r.pin && r.on !== on) {
-    digitalWrite(r.pin, on);
-    r.on = on;
-    r.time = parseInt((new Date()).getTime()/1000);
-    // log("setRelay", name, r);
-    return true;
-  }
-  return false;
-}
-
 
 
 // Initialize DS18B20 temperature sensors and send statistics via WebSockets
+
 const ow = new OneWire(conf.ow.pin);
-let sensors = ow.search().reduce(function (res, id) {
+let sensors = ow.search().reduce(function (obj, id) {
   let d = require("DS18B20").connect(ow, id);
-  let obj = {
+  obj[id] = {
     type: "unknown",
     dev: d,
     temp: null
   };
-
-  // зададим интервал опроса датчиков
-  let chk = () => {
-    d.getTemp((temp) => {
-      // log("Check temperature", id, temp);
-      obj.temp = temp;
-    });
-  };
-
-  chk();
-  setInterval(chk, conf.ow.tCheck * 1000);
-
-  res[id] = obj;
-  return res;
+  return obj;
 }, {});
 
-// Initialize WebSocket auto reconnection dispatcher
+// зададим интервал опроса датчиков
+let checkTemp = () => {
+  Object.keys(sensors).forEach((id) => {
+    sensors[id].dev.getTemp((temp) => {
+      // log("Check temperature", id, temp);
+      sensors[id].temp = temp;
+    });
+  });
+};
+checkTemp();
+setInterval(checkTemp, conf.ow.tCheck * 1000);
+
+
+
+
+
+//
+// // Initialize WebSocket auto reconnection dispatcher
 const WSDispatcher = require("dispatcher");
 let ws = new WSDispatcher();
-
-// Set some WS message handlers
-ws.on("connect", () => {
-  // ws.send("config");
-  ws.send("limits");
-  ws.send("sensors");
-});
-
-// ws.on("error", (err) => {
-//   log("error handler", err);
+//
+// // Set some WS message handlers
+// ws.on("connect", () => {
+//   // ws.send("config");
+//   ws.send("limits");
+//   ws.send("sensors");
 // });
-
-ws.on("close", () => {
-  // log("close handler");
-  setTimeout(() => {
-    ws.connect();
-  }, 3000)
-});
-
-
-// ws.on("config", (data) => {
-//   // log("config handler", data);
-//   conf.device = data;
+//
+// // ws.on("error", (err) => {
+// //   log("error handler", err);
+// // });
+//
+// ws.on("close", () => {
+//   // log("close handler");
+//   setTimeout(() => {
+//     ws.connect();
+//   }, 3000)
 // });
-ws.on("sensors", (data) => {
-  // log("sensors handler", data);
-  // delete conf.sensors;
-  conf.sensors = data;
-  let s = Object.keys(conf.sensors).map((type) => {
-     let id = conf.sensors[type];
-     if (id && sensors[id]) {
-       sensors[id].type = type;
-     }
-     return null;
-  });
-
-});
-ws.on("limits", (data) => {
-  // log("limits handler", data);
-  conf.lims = data;
-});
-
-
-
+//
+//
+// // ws.on("config", (data) => {
+// //   // log("config handler", data);
+// //   conf.device = data;
+// // });
+// ws.on("sensors", (data) => {
+//   // log("sensors handler", data);
+//   // delete conf.sensors;
+//   conf.sensors = data;
+//   let s = Object.keys(conf.sensors).map((type) => {
+//      let id = conf.sensors[type];
+//      if (id && sensors[id]) {
+//        sensors[id].type = type;
+//      }
+//      return null;
+//   });
+//
+// });
+// ws.on("limits", (data) => {
+//   // log("limits handler", data);
+//   conf.lims = data;
+// });
+//
+//
+//
 let wsT = 3000;
 ws.connect((next) => {
   // log("Dispatcher connect");
@@ -122,166 +110,156 @@ ws.connect((next) => {
       // log("WiFi connected");
 
       // let w = new WebSocket(conf.api.host, {
-      let w = new (require("ws"))(conf.api.host, {
-        path: '/',
-        port: conf.api.wsport,
-        protocol: "echo-protocol",
-        protocolVersion: 13,
-        origin: 'Espruino',
-        keepAlive: 600,
-        //headers:{}
-      });
-
-      setTimeout(() => {
-        if (!w.connected) {
-          wsT *= 2;
-          log("Reconnect WS in " + wsT / 1000 + "sec.");
-          ws.connect();
-        } else {
-          wsT = 3000;
-        }
-      }, wsT);
-
-      next(w);
+      // let w = new (require("ws"))(conf.api.host, {
+      //   path: '/',
+      //   port: conf.api.wsport,
+      //   protocol: "echo-protocol",
+      //   protocolVersion: 13,
+      //   origin: 'Espruino',
+      //   keepAlive: 600,
+      //   //headers:{}
+      // });
+      //
+      // setTimeout(() => {
+      //   if (!w.connected) {
+      //     wsT *= 2;
+      //     log("Reconnect WS in " + wsT / 1000 + "sec.");
+      //     ws.connect();
+      //   } else {
+      //     wsT = 3000;
+      //   }
+      // }, wsT);
+      //
+      // next(w);
     }
   });
 });
 
 // Periodically sends temperature to server
-setInterval(() => {
-  ws.send("temperature", Object.keys(sensors).map((id) => {
-    return {
-      type: sensors[id].type,
-      id: id,
-      temperature: sensors[id].temp
-    };
-  }));
-}, conf.ow.tSend * 1000);
+// setInterval(() => {
+//   ws.send("temperature", Object.keys(sensors).map((id) => {
+//     return {
+//       type: sensors[id].type,
+//       id: id,
+//       temperature: sensors[id].temp
+//     };
+//   }));
+// }, conf.ow.tSend * 1000);
+
+
+let now = require("now").Now;
+let secFrom = require("now").Sec;
+let Relay = require("relay");
+
+let compressor = new Relay(conf.relays.compr, (on) => {
+  return true;
+  // return !on || secFrom(this.time) > conf.lims.compr_sleeptime
+});
+
+let heater = new Relay(conf.relays.heater, (on) => {
+  return true;
+  // return on || secFrom(this.time) > conf.lims.heater_stop_minutes
+});
 
 
 
-let Job = {
-  name: "off",
-  iLoop: null,
-  setCompr(on) {
-    let time = (new Date()).getTime()/1000;
-    if (on && conf.relays.compr.time &&
-         time - conf.relays.compr.time < conf.lims.compr_sleeptime) {
-      return false;
-    }
-    return setRelay("compr", on);
-  },
+let worker = {
+  job: "off",
 
-  setHeater(on, force) {
-    let time = (new Date()).getTime()/1000;
-    if (force || on || !conf.relays.heater.time || time - conf.relays.heater.time > conf.lims.heater_stop_minutes) {
-      return setRelay("heater", on);
-    }
-  },
+  sleep:  (force) => compressor.off(force) && heater.off(true),
+  heat:   (force) => compressor.off(force) && heater.on(force),
+  freeze: (force) => heater.off(force) && compressor.on(force),
+  start: () => {},
 
-  run(name, logReason) {
-    if (name === this.name) return;
+  run(job, force, reason) {
+    // log("worker run job", job, force);
+    if (job !== worker.job &&
+        typeof worker[job] === "function" &&
+        worker[job](force)) {
 
-    // if (this.iLoop) {
-    //   clearInterval(this.iLoop);
-    // }
+      worker.job = job;
+      log("worker job started", worker.job, " compressor:", compressor.act ? "+" : "-", "heater:", heater.act ? "+" : "-");
+      // ws.send("job", job);
 
-    // Run given job
-    if (name !== this.name) {
-      switch (name) {
-        case "sleep":
-          if (this.setCompr(false) && this.setHeater(false, true)) {
-            this.name = name;
-            ws.send("job", name);
-          }
-          break;
-        case "heat":
-          if (this.setCompr(false) && this.setHeater(true)) {
-            this.name = name;
-            ws.send("job", name);
-          }
-          break;
-        case "freeze":
-          if (this.setHeater(false) && this.setCompr(true)) {
-            this.name = name;
-            ws.send("job", name);
-          }
-          break;
-      }
-      if (name === this.name) {
-        log("RUN JOB", name, logReason);
-        if (logReason) {
-          ws.send("log", logReason);
-        }
+      if (reason) {
+        // ws.send("log", reason);
       }
     }
+  },
 
-    // Run magic loop
-    if (name === "on") {
-      this.iLoop = setInterval(() => {
+  loop() {
+    if (!conf.lims) return;
 
-        let now = new Date(),
-            time = parseInt(now.getTime() / 1000),
-            hour = now.getHours(),
-            temp = Object.keys(conf.sensors).reduce((obj, key) => {
-              // console.log("temp", key, conf.sensors[key], sensors[conf.sensors[key]]);
-              obj[key] = sensors[conf.sensors[key]] ? sensors[conf.sensors[key]].temp : false;
-              return obj;
-            }, {});
+    let time = now(),
+        hour = (new Date()).getHours(),
+        temp = Object.keys(conf.sensors).reduce((obj, key) => {
+          // console.log("temp", key, conf.sensors[key], sensors[conf.sensors[key]]);
+          obj[key] = sensors[conf.sensors[key]] ? sensors[conf.sensors[key]].temp : false;
+          return obj;
+        }, {});
 
-        // log("JOB LOOP", this.name, hour, temp);
-        // Start heater on time
-        if (this.name !== "heat" &&
-            hour === conf.lims.heater_start_hour
-        ) {
-          // log("START HEATER ON TIME")
-          return this.run("heat", ["heater_start_hour", hour]);
-        }
+    log("JOB LOOP", worker.job, hour, temp);
 
-        // Stop heater on time
-        if (this.name === "heat" &&
-            time - conf.relays.heater.start > conf.lims.heater_stop_minutes * 60
-        ) {
-          // log("STOP HEATER ON TIME")
-          return this.run("sleep", ["heater_stop_minutes", hour]);
-        }
+    // Start heater on time
+    if (worker.job !== "heat" && hour === conf.lims.heater_start_hour) {
+      // log("START HEATER ON TIME")
+      return worker.run("heat", false, ["heater_start_hour", hour]);
+    }
 
-        // Stop freezing on moroz temp < stop temp
-        if (this.name === "freeze" &&
-            temp.moroz && temp.moroz < conf.lims.moroz_stop_temp) {
-          // log("STOP COMPRESSOR (GOOD MOROZ)")
-          return this.run("sleep", ["moroz_stop_temp", temp.moroz]);
-        }
+    // Stop heater on time
+    if (worker.job === "heat" && secFrom(this.heater.time) > conf.lims.heater_stop_minutes * 60) {
+      // log("STOP HEATER ON TIME")
+      return worker.run("sleep", false,["heater_stop_minutes", hour]);
+    }
 
-        // Start freezing on moroz temp > start temp
-        if (this.name !== "freeze" &&
-            temp.moroz && temp.moroz > conf.lims.moroz_start_temp) {
-          // log("START COMPRESSOR (LOW MOROZ)")
-          return this.run("freeze", ["moroz_start_temp", temp.moroz]);
-        }
+    // Stop freezing on moroz temp < stop temp
+    if (worker.job === "freeze" && temp.moroz && temp.moroz < conf.lims.moroz_stop_temp) {
+      // log("STOP COMPRESSOR (GOOD MOROZ)")
+      return worker.run("sleep", ["moroz_stop_temp", temp.moroz]);
+    }
 
-        // Stop freezing on compressor temp > max temp
-        if (this.name === "freeze" &&
-            temp.compr && temp.compr > conf.lims.compr_max_temp) {
-          // log("STOP COMPRESSOR (HIGH TEMP)")
-          return this.run("sleep", ["compr_max_temp", temp.compr]);
-        }
+    // Start freezing on moroz temp > start temp
+    if (worker.job !== "freeze" &&
+        temp.moroz && temp.moroz > conf.lims.moroz_start_temp) {
+      // log("START COMPRESSOR (LOW MOROZ)")
+      return worker.run("freeze", ["moroz_start_temp", temp.moroz]);
+    }
 
-        // Warn on unit temp > max temp
-        if (temp.unit && temp.unit > conf.lims.unit_max_temp) {
-          // log("HIGH UNIT TEMP")
-          ws.send("danger", ["unit_max_temp", temp.unit]);
-        }
+    // Stop freezing on compressor temp > max temp
+    if (worker.job === "freeze" &&
+        temp.compr && temp.compr > conf.lims.compr_max_temp) {
+      // log("STOP COMPRESSOR (HIGH TEMP)")
+      return worker.run("sleep", ["compr_max_temp", temp.compr]);
+    }
 
-        // Start heater on delta temp
-        if (this.name !== "heat" &&
-            temp.body - temp.moroz > conf.lims.delta_temp) {
-          // log("START HEATER (GOOD MOROZ AND LOW BODY TEMP)")
-          return this.run("heat", ["delta_temp", temp.moroz, temp.body]);
-        }
+    // Warn on unit temp > max temp
+    if (temp.unit && temp.unit > conf.lims.unit_max_temp) {
+      // log("HIGH UNIT TEMP")
+      // ws.send("warn", ["unit_max_temp", temp.unit]);
+    }
 
-      }, conf.job.tLoop * 1000);
+    // Start heater on delta temp
+    if (worker.job !== "heat" &&
+        temp.body - temp.moroz > conf.lims.delta_temp) {
+      // log("START HEATER (GOOD MOROZ AND LOW BODY TEMP)")
+      return worker.run("heat", ["delta_temp", temp.moroz, temp.body]);
     }
   }
-};
-Job.run("on");
+}
+
+
+worker.run("start");
+setTimeout(() => worker.run("freeze"), 5000);
+setTimeout(() => worker.run("heat"), 8000);
+
+setInterval(worker.loop, conf.job.tLoop * 1000);
+
+// ws.on("setjob", (job) => {
+//   log("setjob", job);
+//   worker.run(job, true);
+// });
+
+let esp = require("ESP8266");
+log("Free flash", esp.getFreeFlash());
+esp.setCPUFreq(160);
+log("State", esp.getState());
